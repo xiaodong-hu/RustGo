@@ -15,14 +15,11 @@ impl MoveTree {
     pub fn gen_move_randomly(&self)->Position {
         let mut rng = thread_rng();
         let board_size = self.board.size;
-
        
         loop {
             let mut pos = Position { row: rng.gen_range(1..=board_size.0), col: rng.gen_range(1..=board_size.1)};
-            if self.board.move_is_legal(pos) {
+            if self.board.move_is_legal(pos) { // low-efficiency for almost-occupied board
                 return pos;
-            } else {
-                pos = Position { row: rng.gen_range(1..=board_size.0), col: rng.gen_range(1..=board_size.1)};
             }
         }
     }

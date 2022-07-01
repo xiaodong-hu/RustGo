@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, slice::SliceIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Player {
@@ -35,7 +35,7 @@ pub struct GoBoard {
 impl GoBoard {
     pub fn new()->Self {
         let empty_hash = HashMap::new(); // no stone: empty board and empty group
-        GoBoard { state: empty_hash, groups: vec![], size: (19,19) }
+        GoBoard { state: empty_hash, groups: vec![], size: (9,9) } // set the default size of board here
     }
 
     // check if the move is in board
@@ -57,34 +57,105 @@ impl GoBoard {
         in_board && is_empty
     }
 
+    // get the neighbor positions for the given move: boundary effect is taken into
+    fn get_neighbors(&self, pos:Position)->Vec<Position> {
+        let mut neighbors = vec![];
+        let x_max = self.size.0;
+        let y_max = self.size.1;
+
+        let pos_right = Position{row:pos.row+1, col:pos.col};
+        let pos_left = Position{row:pos.row-1, col:pos.col};
+        let pos_up = Position{row:pos.row, col:pos.col+1};
+        let pos_down = Position{row:pos.row, col:pos.col-1};
+
+        if pos.row < x_max && pos.row != 1 && pos.col < y_max && pos.col != 1 { // middle
+            neighbors.push(pos_right);
+            neighbors.push(pos_left);
+            neighbors.push(pos_up);
+            neighbors.push(pos_down);
+        } else if pos.row == x_max && pos.col < y_max && pos.col != 1 { // right edge
+            neighbors.push(pos_left);
+            neighbors.push(pos_up);
+            neighbors.push(pos_down);
+        }  else if pos.row < x_max && pos.row != 1 && pos.col == y_max { // upper edge
+            neighbors.push(pos_right);
+            neighbors.push(pos_left);
+            neighbors.push(pos_down);
+        }  else if pos.row == 1 && pos.col < y_max && pos.col != 1 { // left edge
+            neighbors.push(pos_right);
+            neighbors.push(pos_down);
+            neighbors.push(pos_up);
+        }  else if pos.row < x_max && pos.row != 1 && pos.col == 1 { // lower edge
+            neighbors.push(pos_right);
+            neighbors.push(pos_left);
+            neighbors.push(pos_up);
+        } else if pos.row == 1 && pos.col == 1 { // down left corner
+            neighbors.push(pos_right);
+            neighbors.push(pos_up);
+        } else if pos.row == x_max && pos.col == 1 { // down right corner
+            neighbors.push(pos_left);
+            neighbors.push(pos_up);
+        } else if pos.row == x_max && pos.col == y_max { // upper right corner
+            neighbors.push(pos_left);
+            neighbors.push(pos_down);
+        } else if pos.row == 1 && pos.col == y_max { // upper left corner
+            neighbors.push(pos_right);
+            neighbors.push(pos_down);
+        }
+        neighbors
+    }
+
+    fn refresh_groups(&mut self, pos:Position, color:Player) {
+        let neighbors = self.get_neighbors(pos);
+
+        let newly_connected_groups_indexes = self.groups.iter().
+            enumerate().
+            filter_map(|(index, group_hash)| // construct the vector of indexes of groups that touches the given move
+                if {
+                    let mut touched_or_not = false;
+                    for p in &neighbors {
+                        if group_hash.contains_key(&p) && group_hash.get(&p).unwrap() == &color {
+                            touched_or_not = true;
+                            break;
+                        }
+                    }
+                    touched_or_not
+                } {
+                    Some(index)
+                } else {
+                    None
+                }
+            ).collect::<Vec<_>>();
+
+        if newly_connected_groups_indexes.len() == 0 { // simply add a new single-stone group
+            let mut single_stone_group = HashMap::new();
+            single_stone_group.insert(pos, color);
+            self.groups.push(single_stone_group)
+        } else if newly_connected_groups_indexes.len() == 1 { // add to such group without any group merge
+            self.groups[newly_connected_groups_indexes[0]].insert(pos, color);
+        } else { // group merge occurs
+            self.groups[newly_connected_groups_indexes[0]].insert(pos, color); // first, add to the first touching group the given move
+            
+            let old_group_hash_vec = self.groups.clone(); // closure only support single access to self.groups (see below); so an extra duplication is needed here
+            for i in 0..newly_connected_groups_indexes.len() { // second, merge all (k,v) of other connected groups to the first touching group
+                old_group_hash_vec[newly_connected_groups_indexes[i]].iter().
+                    map(|(&k,&v)| self.groups[newly_connected_groups_indexes[0]].insert(k,v));
+                
+                self.groups.remove(newly_connected_groups_indexes[i]); // finally, remove the deeply copied groups from the Vec<HashMap<_>> 
+            }
+        }
+    }
+
     pub fn play(&mut self, pos:Position, color:Player) {
         if self.move_is_legal(pos) {
-            //let neighbors_hash = neighbors_for_current_move(self, pos);
-            let mut current_move = HashMap::new();
-            current_move.insert(pos, color);
+            let mut single_stone_group = HashMap::new();
+            single_stone_group.insert(pos, color);
 
             //println!("{:?}", neighbors_hash);
             if self.groups.len() == 0 {
-                self.groups.push(current_move)
+                self.groups.push(single_stone_group);
             } else {
-                let mut indicator = 0; // indicator to see if there are groups contain such move
-                for group_hash in &mut self.groups { // the only correct way to mutate the vec while iteration!
-                    let move_is_contained_or_not: bool = {
-                        let pos_right = Position{row:pos.row+1, col:pos.col};
-                        let pos_left = Position{row:pos.row-1, col:pos.col};
-                        let pos_up = Position{row:pos.row, col:pos.col+1};
-                        let pos_down = Position{row:pos.row, col:pos.col-1};
-                        group_hash.contains_key(&pos_right) || group_hash.contains_key(&pos_left) || group_hash.contains_key(&pos_up) || group_hash.contains_key(&pos_down)
-                    };
-                    if move_is_contained_or_not {
-                        group_hash.insert(pos, color);
-                        indicator += 1;
-                        break;
-                    }
-                }
-                if indicator == 0 {
-                    self.groups.push(current_move)
-                }
+                self.refresh_groups(pos, color);
             }
             self.state.insert(pos, color);
         } // do nothing for illegal moves
@@ -130,6 +201,12 @@ impl GoBoard {
             print!(" {}", (row_char as char).to_string().bold().green());
         }
         println!("\n");
+
+        self.show_stone_groups();
+        Ok(())
+    }
+    
+    pub fn show_stone_groups(&self) {
         println!("\t{} Groups of Stones Found on board:", self.groups.len());
         for group_hash in &self.groups {
             print!("\t - [");
@@ -139,7 +216,6 @@ impl GoBoard {
             println!("]");
         }
         println!();
-        Ok(())
     }
 }
 
