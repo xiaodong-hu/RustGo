@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, slice::SliceIndex};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Player {
@@ -35,7 +35,7 @@ pub struct GoBoard {
 impl GoBoard {
     pub fn new()->Self {
         let empty_hash = HashMap::new(); // no stone: empty board and empty group
-        GoBoard { state: empty_hash, groups: vec![], size: (9,9) } // set the default size of board here
+        GoBoard { state: empty_hash, groups: vec![], size: (5,5) } // set the default size of board here
     }
 
     // check if the move is in board
@@ -107,7 +107,6 @@ impl GoBoard {
 
     fn refresh_groups(&mut self, pos:Position, color:Player) {
         let neighbors = self.get_neighbors(pos);
-
         let newly_connected_groups_indexes = self.groups.iter().
             enumerate().
             filter_map(|(index, group_hash)| // construct the vector of indexes of groups that touches the given move
@@ -116,7 +115,7 @@ impl GoBoard {
                     for p in &neighbors {
                         if group_hash.contains_key(&p) && group_hash.get(&p).unwrap() == &color {
                             touched_or_not = true;
-                            break;
+                            //break;
                         }
                     }
                     touched_or_not
@@ -133,26 +132,28 @@ impl GoBoard {
             self.groups.push(single_stone_group)
         } else if newly_connected_groups_indexes.len() == 1 { // add to such group without any group merge
             self.groups[newly_connected_groups_indexes[0]].insert(pos, color);
-        } else { // group merge occurs
-            self.groups[newly_connected_groups_indexes[0]].insert(pos, color); // first, add to the first touching group the given move
+        } else if newly_connected_groups_indexes.len() > 1 { // groups merge occur
             
-            let old_group_hash_vec = self.groups.clone(); // closure only support single access to self.groups (see below); so an extra duplication is needed here
-            for i in 0..newly_connected_groups_indexes.len() { // second, merge all (k,v) of other connected groups to the first touching group
-                old_group_hash_vec[newly_connected_groups_indexes[i]].iter().
-                    map(|(&k,&v)| self.groups[newly_connected_groups_indexes[0]].insert(k,v));
-                
-                self.groups.remove(newly_connected_groups_indexes[i]); // finally, remove the deeply copied groups from the Vec<HashMap<_>> 
+            // first, add the move to the first touching group
+            self.groups[newly_connected_groups_indexes[0]].insert(pos, color);
+            
+            // second, merge all (k,v) of other connected groups to the first touching group
+            for i in 1..newly_connected_groups_indexes.len() {
+                for (k,v) in &mut self.groups[newly_connected_groups_indexes[i]].clone() { // clone() to avoid double mutable references
+                    self.groups[newly_connected_groups_indexes[0]].insert(*k,*v); // mutable reference is used for insert()
+                }
+
+                // finally, remove the deeply copied groups from the Vec<HashMap<_>> 
+                self.groups.remove(newly_connected_groups_indexes[i]-i+1);
             }
         }
     }
 
     pub fn play(&mut self, pos:Position, color:Player) {
         if self.move_is_legal(pos) {
-            let mut single_stone_group = HashMap::new();
-            single_stone_group.insert(pos, color);
-
-            //println!("{:?}", neighbors_hash);
             if self.groups.len() == 0 {
+                let mut single_stone_group = HashMap::new();
+                single_stone_group.insert(pos, color);
                 self.groups.push(single_stone_group);
             } else {
                 self.refresh_groups(pos, color);
@@ -202,7 +203,7 @@ impl GoBoard {
         }
         println!("\n");
 
-        self.show_stone_groups();
+        //self.show_stone_groups();
         Ok(())
     }
     
@@ -218,24 +219,3 @@ impl GoBoard {
         println!();
     }
 }
-
-// fn neighbors_for_current_move(board: &GoBoard, pos:Position)->HashMap<Position, Option<Player>> {
-//     let x_max = board.size.0;
-//     let y_max = board.size.1;
-
-//     let mut possible_neighbors = HashMap::new();
-
-//     if pos.row+1 <= x_max {
-//         possible_neighbors.insert(Position{row:pos.row+1, col:pos.col}, None); // we do not need to specify the player for the neighbors
-//     }
-//     if pos.row-1 >= 1 {
-//         possible_neighbors.insert(Position{row:pos.row-1, col:pos.col}, None);
-//     }
-//     if pos.col+1 <= y_max {
-//         possible_neighbors.insert(Position{row:pos.row, col:pos.col+1}, None);
-//     }
-//     if pos.col-1 >= 1 {
-//         possible_neighbors.insert(Position{row:pos.row, col:pos.col-1}, None);
-//     }
-//     possible_neighbors
-// }
